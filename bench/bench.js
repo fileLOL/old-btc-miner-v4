@@ -1,0 +1,1 @@
+const S=require('../public/sha256d.js');const h=Buffer.alloc(80);const N=100000;const t=performance.now();for(let i=0;i<N;i++)S.hash80(h,i>>>0);const dt=performance.now()-t;console.log(`${Math.round(N*1000/dt).toLocaleString()} H/s over ${N} hashes`);

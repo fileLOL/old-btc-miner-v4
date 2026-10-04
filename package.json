@@ -1,0 +1,16 @@
+{
+  "name": "old-btc-miner-v5",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Bitcoin Core mainnet CPU solo-mining dashboard and browser worker",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/core.test.js && node test/serialization.test.js",
+    "bench": "node bench/bench.js",
+    "audit": "node audit/verify-v5-consensus.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}

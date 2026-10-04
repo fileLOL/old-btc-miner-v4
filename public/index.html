@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OLD BTC MINER // MAINNET</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="crt">
+  <header class="topbar">
+    <div class="brand">₿ OLD BTC MINER</div>
+    <div class="status"><span id="led"></span> <span id="statusText">OFFLINE</span></div>
+    <div class="clock" id="clock">--:--:--</div>
+  </header>
+
+  <section class="grid">
+    <article class="panel hero">
+      <div class="panel-title">[ MINING CONSOLE ]</div>
+      <div class="big-btc">₿</div>
+      <div class="metric"><span>NETWORK</span><b id="network">UNKNOWN</b></div>
+      <div class="metric"><span>BLOCK HEIGHT</span><b id="blocks">---</b></div>
+      <div class="metric"><span>DIFFICULTY</span><b id="difficulty">---</b></div>
+      <div class="metric"><span>NETWORK HASHRATE</span><b id="hashrate">---</b></div>
+      <div class="buttons">
+        <button id="refresh">[ REFRESH NODE ]</button>
+        <button id="template">[ GET BLOCK TEMPLATE ]</button>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-title">[ MINER ]</div>
+      <div class="ascii">+------------------+<br>|  SHA-256 ENGINE  |<br>|  EXTERNAL ASIC    |<br>+------------------+</div>
+      <div class="metric"><span>MODE</span><b>SOLO / MAINNET</b></div>
+      <div class="metric"><span>STATUS</span><b id="minerStatus">IDLE</b></div>
+      <div class="metric"><span>BLOCK TEMPLATE</span><b id="templateHeight">---</b></div>
+      <p class="note">Browser JavaScript does NOT mine Bitcoin mainnet. Connect an ASIC/miner to your Bitcoin Core node and use the template shown here.</p>
+      <div id="log" class="log">SYSTEM READY...</div>
+    </article>
+
+    <article class="panel wallet">
+      <div class="panel-title">[ WALLET / SEND ]</div>
+      <div class="metric"><span>WALLET</span><b id="wallet">---</b></div>
+      <div class="metric"><span>BALANCE</span><b id="balance">---</b></div>
+      <label>DESTINATION ADDRESS
+        <input id="address" autocomplete="off" placeholder="bc1... / 1... / 3...">
+      </label>
+      <label>AMOUNT BTC
+        <input id="amount" inputmode="decimal" placeholder="0.00010000">
+      </label>
+      <label class="check"><input id="subtractFee" type="checkbox"> SUBTRACT FEE FROM AMOUNT</label>
+      <button class="send" id="send">[ SEND TO MAINNET ]</button>
+      <div id="tx" class="tx">NO TRANSACTION</div>
+    </article>
+
+    <article class="panel info">
+      <div class="panel-title">[ BLOCK TEMPLATE ]</div>
+      <div class="row"><span>HEIGHT</span><b id="tHeight">---</b></div>
+      <div class="row"><span>PREVIOUS</span><b id="prev">---</b></div>
+      <div class="row"><span>BITS</span><b id="bits">---</b></div>
+      <div class="row"><span>TARGET</span><b id="target">---</b></div>
+      <div class="row"><span>TX COUNT</span><b id="txcount">---</b></div>
+      <div class="row"><span>COINBASE VALUE</span><b id="coinbase">---</b></div>
+      <div class="warning">⚠ MAINNET ACTIONS USE REAL BTC.</div>
+    </article>
+  </section>
+
+  <footer>OLD BTC MINER v1.0 // BITCOIN CORE RPC // MAINNET // NO PRIVATE KEYS IN BROWSER</footer>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+Run `npm run audit` with a local Bitcoin Core node. The live audit is intentionally not claimed in environments without Core RPC. It verifies mainnet chain state, historical header hashing, and (when available) a fresh getblocktemplate. No block is submitted by the audit.
