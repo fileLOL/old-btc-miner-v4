@@ -15,6 +15,7 @@ const rewardEngine=require('./lib/reward-engine');
 const PayoutProcessor=require('./lib/payout-processor');
 const PayoutMonitor=require('./lib/payout-monitor');
 const AuditLog=require('./lib/audit');
+const TestPayoutRunner=require('./lib/test-payout-runner');
 
 const app=express();
 const server=http.createServer(app);
@@ -43,6 +44,7 @@ const rateLimiter=new RateLimiter({maxPerMinute:60,maxSharesPerMinute:30});
 const blockMonitor=new BlockMonitor(config,btcCli);
 const payoutProcessor=new PayoutProcessor(config,btcCli);
 const payoutMonitor=new PayoutMonitor(config,btcCli);
+const testPayoutRunner=new TestPayoutRunner(config,btcCli);
 
 function calculateBlockHash(blockHex){
 const headerBuf=Buffer.from(blockHex.slice(0,160),'hex');
@@ -252,6 +254,31 @@ else{summary=AuditLog.getPoolSummary()}
 res.json({ok:true,summary})}
 catch(e){res.status(500).json({ok:false,error:e.message})}});
 
+app.get('/api/admin/test-payout/status',(_q,res)=>{
+try{
+res.json({ok:true,
+enabled:config.ENABLE_REAL_PAYOUT_TEST,
+dryRun:config.PAYOUT_DRY_RUN,
+destination:testPayoutRunner.getTestAddress()||'(not configured)',
+amountSat:testPayoutRunner.getTestAmountSat(),
+minPayoutSat:config.MIN_PAYOUT_SAT,
+maxPayoutSat:config.MAX_PAYOUT_SAT,
+testDbPath:testPayoutRunner.getTestDbPath()})}
+catch(e){res.status(500).json({ok:false,error:e.message})}});
+
+app.post('/api/admin/test-payout/run',async(req,res)=>{
+try{
+const result=await testPayoutRunner.run();
+res.json({ok:result.success!==false,result})}
+catch(e){res.status(500).json({ok:false,error:e.message})}});
+
+app.get('/api/admin/test-payout/state',(_q,res)=>{
+try{
+const state=testPayoutRunner.getState();
+if(!state)return res.json({ok:true,state:null,message:'test DB not initialised yet'})
+res.json({ok:true,state})}
+catch(e){res.status(500).json({ok:false,error:e.message})}});
+
 const wss=new WebSocket.Server({server,path:'/ws'});
 
 wss.on('connection',(ws,req)=>{
@@ -423,6 +450,7 @@ minerTracker.destroy();
 rateLimiter.destroy();
 blockMonitor.stop();
 payoutMonitor.stop();
+try{testPayoutRunner.close()}catch{}
 jobManager.activeJobs.clear();
 wss.close();
 server.close();

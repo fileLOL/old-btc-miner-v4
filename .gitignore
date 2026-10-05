@@ -22,3 +22,6 @@ job.json
 # Documentos internos (no subir)
 AUDITORIA-SEGURIDAD-FINAL.md
 FASE3-IMPLEMENTATION-REPORT.md
+
+.vercel
+.env*
