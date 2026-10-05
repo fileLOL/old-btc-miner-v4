@@ -1,6 +1,7 @@
 const assert=require('assert');
 const path=require('path');
 const fs=require('fs');
+const Database=require('better-sqlite3');
 const TestPayoutRunner=require('../lib/test-payout-runner');
 
 (async()=>{
@@ -63,6 +64,7 @@ runner.setTestBalance(50000);
 const result=await runner.run();
 assert.strictEqual(result.success,true);
 assert.strictEqual(result.dryRun,true);
+assert.strictEqual(result.simulated,true);
 assert.strictEqual(result.txid,null);
 assert.strictEqual(result.restored,true);
 assert.strictEqual(runner.getTestBalance(),50000,'balance restored');
@@ -267,6 +269,86 @@ assert.strictEqual(result.dryRun,true,'PAYOUT_DRY_RUN wins');
 const sendCalls=mock.calls.filter(c=>c[0]==='sendtoaddress');
 assert.strictEqual(sendCalls.length,0,'no sendtoaddress even with ENABLE_REAL_PAYOUT_TEST=true');
 runner.close();
+console.log('  PASS\n')}
+
+console.log('[14] run() inicializa balance de prueba automaticamente sin setTestBalance manual');
+{
+const mock=makeMockBtc(1000000,false);
+const runner=new TestPayoutRunner({
+MIN_PAYOUT_SAT:50000,MAX_PAYOUT_SAT:100000000,
+PAYOUT_DRY_RUN:true,ENABLE_REAL_PAYOUT_TEST:false,
+TEST_PAYOUT_DB_PATH:TEST_DB,TEST_PAYOUT_ADDRESS:VALID_ADDR,TEST_PAYOUT_SAT:50000},
+mock.fn);
+const result=await runner.run();
+assert.strictEqual(result.success,true,'run() succeeds without manual setTestBalance');
+assert.strictEqual(result.dryRun,true);
+assert.strictEqual(result.restored,true);
+assert.strictEqual(runner.getTestBalance(),50000,'balance restored to initial test amount after dry run');
+const audit=runner.getAuditTrail();
+const initEntry=audit.find(e=>e.type==='test_balance_initialized');
+assert(initEntry,'test_balance_initialized audit entry exists');
+assert.strictEqual(initEntry.amount_sat,50000,'audit recorded correct amount');
+const sendCalls=mock.calls.filter(c=>c[0]==='sendtoaddress');
+assert.strictEqual(sendCalls.length,0,'no sendtoaddress called');
+runner.close();
+console.log('  PASS\n')}
+
+console.log('[15] DB aislada: test-payout.db independiente de pool.db');
+{
+const poolDbPath=path.join(__dirname,'..','data','pool.db');
+const poolExisted=fs.existsSync(poolDbPath);
+const poolSizeBefore=poolExisted?fs.statSync(poolDbPath).size:null;
+
+const mock=makeMockBtc(1000000,false);
+const runner=new TestPayoutRunner({
+MIN_PAYOUT_SAT:50000,MAX_PAYOUT_SAT:100000000,
+PAYOUT_DRY_RUN:true,ENABLE_REAL_PAYOUT_TEST:false,
+TEST_PAYOUT_DB_PATH:TEST_DB,TEST_PAYOUT_ADDRESS:VALID_ADDR,TEST_PAYOUT_SAT:50000},
+mock.fn);
+await runner.run();
+assert(fs.existsSync(TEST_DB),'test DB exists during runner lifetime');
+const testDb=new Database(TEST_DB);
+const bal=testDb.prepare('SELECT confirmed_sat FROM test_balances WHERE id=1').get();
+assert.strictEqual(bal.confirmed_sat,50000,'test DB has correct balance');
+testDb.close();
+runner.close();
+
+const poolSizeAfter=fs.existsSync(poolDbPath)?fs.statSync(poolDbPath).size:null;
+assert.strictEqual(poolSizeBefore,poolSizeAfter,'pool.db untouched');
+console.log('  pool.db size before:',poolSizeBefore,'after:',poolSizeAfter);
+console.log('  PASS\n')}
+
+console.log('[16] Campo simulated: dry_run=true => simulated=true, real => simulated=false');
+{
+const mockDry=makeMockBtc(1000000,false);
+const runnerDry=new TestPayoutRunner({
+MIN_PAYOUT_SAT:50000,MAX_PAYOUT_SAT:100000000,
+PAYOUT_DRY_RUN:true,ENABLE_REAL_PAYOUT_TEST:false,
+TEST_PAYOUT_DB_PATH:TEST_DB,TEST_PAYOUT_ADDRESS:VALID_ADDR,TEST_PAYOUT_SAT:50000},
+mockDry.fn);
+const resDry=await runnerDry.run();
+assert.strictEqual(resDry.dryRun,true,'dryRun flag true');
+assert.strictEqual(resDry.simulated,true,'dry run must be simulated');
+assert.strictEqual(resDry.txid,null,'no txid in dry run');
+assert.strictEqual(resDry.restored,true,'balance restored in dry run');
+assert.strictEqual(mockDry.calls.filter(c=>c[0]==='sendtoaddress').length,0,'no sendtoaddress in dry run');
+runnerDry.close();
+
+const mockReal=makeMockBtc(1000000,false);
+const runnerReal=new TestPayoutRunner({
+MIN_PAYOUT_SAT:50000,MAX_PAYOUT_SAT:100000000,
+PAYOUT_DRY_RUN:false,ENABLE_REAL_PAYOUT_TEST:true,
+TEST_PAYOUT_DB_PATH:TEST_DB,TEST_PAYOUT_ADDRESS:VALID_ADDR,TEST_PAYOUT_SAT:50000},
+mockReal.fn);
+runnerReal.initTestDb();
+runnerReal.setTestBalance(50000);
+const resReal=await runnerReal.run();
+assert.strictEqual(resReal.dryRun,false,'dryRun flag false for real');
+assert.strictEqual(resReal.simulated,false,'real payout must not be simulated');
+assert(resReal.txid&&resReal.txid.startsWith('txid_mock_'),'real txid present');
+assert.strictEqual(resReal.restored,false,'balance not restored in real');
+assert.strictEqual(mockReal.calls.filter(c=>c[0]==='sendtoaddress').length,1,'sendtoaddress called once');
+runnerReal.close();
 console.log('  PASS\n')}
 
 if(fs.existsSync(TEST_DB))fs.unlinkSync(TEST_DB);
