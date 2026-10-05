@@ -25,7 +25,7 @@ function setMiningRate(h){$('minerHashrate').textContent=fmtRate(h)}
 function connectWS(){
 const wsUrl=window.BACKEND_URL||'';
 if(!wsUrl){log('BACKEND_URL NOT CONFIGURED');return}
-try{ws=new WebSocket(wsUrl)}catch(e){log('WS CONNECT FAILED: '+e.message);return}
+try{ws=new WebSocket(wsUrl+'/ws')}catch(e){log('WS CONNECT FAILED: '+e.message);return}
 ws.onopen=()=>{
 log('WEBSOCKET CONNECTED');
 const btcAddress=$('btcAddress')?.value.trim();
