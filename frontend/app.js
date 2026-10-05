@@ -81,4 +81,4 @@ function stopMining(){running=false;stopWorkers();$('minerStatus').textContent='
 
 $('start').onclick=startMining;
 $('stop').onclick=stopMining;
-refresh();
+refresh();connectWS();
