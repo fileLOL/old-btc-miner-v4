@@ -1,25 +1,432 @@
-const express=require('express'),path=require('path'),{execFile}=require('child_process'),{promisify}=require('util');
-const run=promisify(execFile),app=express(),PORT=process.env.PORT||3000;
-app.use(express.json({limit:'16mb'}));app.use(express.static(path.join(__dirname,'public')));
-async function btcCli(args){const cli=process.env.BITCOIN_CLI||'bitcoin-cli';const {stdout,stderr}=await run(cli,args,{timeout:30000,windowsHide:true,maxBuffer:16*1024*1024});if(stderr&&stderr.trim())throw Error(stderr.trim());return stdout.trim()}
-app.get('/api/status',async(_q,r)=>{try{const [a,b]=await Promise.all([btcCli(['getblockchaininfo']),btcCli(['getmininginfo'])]);const i=JSON.parse(a),m=JSON.parse(b);r.json({ok:true,chain:i.chain,blocks:i.blocks,headers:i.headers,verificationprogress:i.verificationprogress,difficulty:i.difficulty,networkhashps:m.networkhashps,warnings:m.warnings||''})}catch(e){r.status(503).json({ok:false,error:e.message})}});
-app.get('/api/wallet',async(_q,r)=>{try{const w=JSON.parse(await btcCli(['getwalletinfo']));r.json({ok:true,walletname:w.walletname,balance:w.balance,unconfirmed_balance:w.unconfirmed_balance,txcount:w.txcount})}catch(e){r.status(503).json({ok:false,error:e.message})}});
-app.get('/api/template',async(_q,r)=>{try{const t=JSON.parse(await btcCli(['getblocktemplate','{"rules":["segwit"]}']));r.json({ok:true,height:t.height,previousblockhash:t.previousblockhash,bits:t.bits,target:t.target,curtime:t.curtime,mintime:t.mintime,transactions:t.transactions?.length||0,coinbasevalue:t.coinbasevalue,raw:t})}catch(e){r.status(503).json({ok:false,error:e.message})}});
-function revhex(s){return s.match(/../g).reverse().join('')}
-function compactVarint(n){if(n<0xfd)return Buffer.from([n]);if(n<=0xffff)return Buffer.from([0xfd,n&255,n>>>8]);if(n<=0xffffffff)return Buffer.from([0xfe,n&255,n>>>8,(n>>>16)&255,(n>>>24)&255]);let b=Buffer.alloc(9);b[0]=0xff;b.writeBigUInt64LE(BigInt(n),1);return b}
-function pushdata(buf){if(buf.length<76)return Buffer.concat([Buffer.from([buf.length]),buf]);if(buf.length<256)return Buffer.concat([Buffer.from([0x4c,buf.length]),buf]);throw Error('coinbase data too long')}
-function encodeScriptNum(n){let x=BigInt(n),a=[];while(x){a.push(Number(x&255n));x>>=8n}if(a.length===0)a=[0];if(a[a.length-1]&0x80)a.push(0);return Buffer.from(a)}
-const ALPH='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-function b58(s){let n=0n;for(const c of s){const i=ALPH.indexOf(c);if(i<0)throw Error('invalid base58');n=n*58n+BigInt(i)}let h=n.toString(16);if(h.length%2)h='0'+h;let b=Buffer.from(h,'hex');let z=0;for(const c of s){if(c==='1')z++;else break}return Buffer.concat([Buffer.alloc(z),b])}
-function checksumOk(b){const crypto=require('crypto');return crypto.createHash('sha256').update(crypto.createHash('sha256').update(b.subarray(0,-4)).digest()).digest().subarray(0,4).equals(b.subarray(-4))}
-function addressScript(addr){if(addr.toLowerCase().startsWith('bc1')){const s=addr.toLowerCase(),pos=s.indexOf('1'),data=s.slice(pos+1);const map='qpzry9x8gf2tvdw0s3jn54khce6mua7l';let vals=[];for(const c of data.slice(0,-6)){const v=map.indexOf(c);if(v<0)throw Error('invalid bech32');vals.push(v)}let witver=vals.shift();if(witver>16)throw Error('invalid witness version');let acc=0,bits=0,out=[];for(const v of vals){acc=(acc<<5)|v;bits+=5;while(bits>=8){bits-=8;out.push((acc>>bits)&255)}}if(bits>=5||((acc<<(8-bits))&255))throw Error('invalid bech32 padding');const prog=Buffer.from(out);if((witver===0&&(prog.length!==20&&prog.length!==32))||(witver>0&&(prog.length<2||prog.length>40)))throw Error('invalid witness program');return Buffer.concat([Buffer.from([witver===0?0:0x50+witver,prog.length]),prog])}
-const b=b58(addr);if(b.length<5||!checksumOk(b))throw Error('invalid base58 checksum');const ver=b[0],p=b.subarray(1,-4);if(ver===0x00&&p.length===20)return Buffer.concat([Buffer.from([0x00,0x14]),p]);if(ver===0x05&&p.length===20)return Buffer.concat([Buffer.from([0xa9,0x14]),p,Buffer.from([0x87])]);throw Error('unsupported address')}
-function buildCoinbase(t,address){const crypto=require('crypto');const payout=addressScript(address);const height=pushdata(encodeScriptNum(t.height));const extra=crypto.randomBytes(8);const prefix=Buffer.from((t.coinbaseaux&&t.coinbaseaux.flags)||'','hex');let script=Buffer.concat([height,pushdata(prefix),pushdata(extra)]);if(script.length<2)script=Buffer.concat([script,Buffer.from([0])]);if(script.length>100)throw Error('coinbase scriptSig >100');const reserved=Buffer.alloc(32);const outs=[];const value=Buffer.alloc(8);value.writeBigUInt64LE(BigInt(t.coinbasevalue));outs.push(Buffer.concat([value,pushdata(payout)]));if(t.default_witness_commitment){const commitment=Buffer.from(t.default_witness_commitment,'hex');const cv=Buffer.alloc(8);outs.push(Buffer.concat([cv,pushdata(commitment)]))}const tx=Buffer.concat([Buffer.from([2,0,0,0,1]),Buffer.alloc(32,0),Buffer.alloc(4,255),compactVarint(script.length),script,compactVarint(outs.length),...outs,Buffer.from([1,32]),reserved,Buffer.alloc(4,0)]);return {tx,script}}
-function dsha(b){const c=require('crypto');return c.createHash('sha256').update(c.createHash('sha256').update(b).digest()).digest()}
-function txidLE(hex){return Buffer.from(dsha(Buffer.from(hex,'hex'))).reverse()}
-function merkle(txs,coinbase){let a=[txidLE(coinbase.toString('hex')),...txs.map(x=>Buffer.from(x.txid,'hex').reverse())];while(a.length>1){let n=[];for(let i=0;i<a.length;i+=2)n.push(Buffer.from(dsha(Buffer.concat([a[i],a[i+1]||a[i]])).reverse()));a=n}return a[0]||Buffer.alloc(32)}
-function buildJob(t,address){const cb=buildCoinbase(t,address).tx;const mr=merkle(t.transactions||[],cb);const header=Buffer.alloc(80);header.writeUInt32LE(t.version>>>0,0);Buffer.from(t.previousblockhash,'hex').reverse().copy(header,4);mr.copy(header,36);header.writeUInt32LE(t.curtime>>>0,68);Buffer.from(t.bits,'hex').reverse().copy(header,72);const body=Buffer.concat([compactVarint((t.transactions||[]).length+1),cb,...(t.transactions||[]).map(x=>Buffer.from(x.data,'hex'))]);return {height:t.height,header:[...header],target:[...Buffer.from(t.target,'hex')],bodyHex:body.toString('hex'),bits:t.bits,coinbasevalue:t.coinbasevalue}}
-app.get('/api/job',async(req,res)=>{try{const address=String(req.query.address||'').trim();if(!address)throw Error('Payout address required');const t=JSON.parse(await btcCli(['getblocktemplate','{"rules":["segwit"]}']));if(t.capabilities&&!t.capabilities.includes('proposal')){}res.json({ok:true,...buildJob(t,address)})}catch(e){res.status(400).json({ok:false,error:e.message})}});
-app.post('/api/submit',async(req,res)=>{try{const block=String(req.body?.block||'');if(!/^[0-9a-fA-F]+$/.test(block)||block.length<160||block.length%2)throw Error('Invalid block hex');const result=await btcCli(['submitblock',block]);res.json({ok:true,result:result||'accepted'})}catch(e){res.status(400).json({ok:false,error:e.message})}});
-app.post('/api/send',async(req,res)=>{if(process.env.ENABLE_SEND!=='1')return res.status(403).json({ok:false,error:'Wallet send disabled. Set ENABLE_SEND=1 explicitly.'});const {address,amount,subtractFeeFromAmount=false}=req.body||{};const value=Number(amount);if(!address||!Number.isFinite(value)||value<=0)return res.status(400).json({ok:false,error:'Invalid address or amount'});try{const args=['sendtoaddress',address,String(value)];if(subtractFeeFromAmount)args.push('','', 'false','true');res.json({ok:true,txid:await btcCli(args)})}catch(e){res.status(503).json({ok:false,error:e.message})}});
-app.listen(PORT,'127.0.0.1',()=>console.log(`OLD BTC MINER V5 -> http://127.0.0.1:${PORT}`));
+const express=require('express'),path=require('path'),{execFile}=require('child_process'),{promisify}=require('util'),http=require('http'),crypto=require('crypto');
+const WebSocket=require('ws');
+const run=promisify(execFile);
+const config=require('./lib/config');
+const JobManager=require('./lib/job-manager');
+const ShareValidator=require('./lib/share-validator');
+const MinerTracker=require('./lib/miner-tracker');
+const RateLimiter=require('./lib/rate-limiter');
+const{buildJob,buildBlock,SHA256D}=require('./lib/block-builder');
+const{getDb,closeDb}=require('./lib/db');
+const accountManager=require('./lib/account-manager');
+const{validateAddress}=require('./lib/address-validator');
+const BlockMonitor=require('./lib/block-monitor');
+const rewardEngine=require('./lib/reward-engine');
+const PayoutProcessor=require('./lib/payout-processor');
+const PayoutMonitor=require('./lib/payout-monitor');
+const AuditLog=require('./lib/audit');
+
+const app=express();
+const server=http.createServer(app);
+const PORT=config.PORT;
+
+app.use((req,res,next)=>{
+const origin=config.CORS_ORIGIN;
+if(origin==='*'){res.header('Access-Control-Allow-Origin','*')}
+else if(origin&&origin.split(',').map(s=>s.trim()).includes(req.headers.origin)){res.header('Access-Control-Allow-Origin',req.headers.origin)}
+res.header('Access-Control-Allow-Methods','GET,POST,OPTIONS');
+res.header('Access-Control-Allow-Headers','Content-Type');
+if(req.method==='OPTIONS')return res.sendStatus(200);
+next()});
+
+app.use(express.json({limit:'16mb'}));
+app.use(express.static(path.join(__dirname,'public')));
+
+let db;
+try{db=getDb()}catch(e){console.error('Database init error:',e.message)}
+
+const jobManager=new JobManager(config);
+const shareValidator=new ShareValidator(jobManager);
+const minerTracker=new MinerTracker(config);
+minerTracker.setAccountManager(accountManager);
+const rateLimiter=new RateLimiter({maxPerMinute:60,maxSharesPerMinute:30});
+const blockMonitor=new BlockMonitor(config,btcCli);
+const payoutProcessor=new PayoutProcessor(config,btcCli);
+const payoutMonitor=new PayoutMonitor(config,btcCli);
+
+function calculateBlockHash(blockHex){
+const headerBuf=Buffer.from(blockHex.slice(0,160),'hex');
+const hash1=crypto.createHash('sha256').update(headerBuf).digest();
+const hash2=crypto.createHash('sha256').update(hash1).digest();
+return Buffer.from(hash2).reverse().toString('hex')}
+
+async function btcCli(args){
+const{stdout,stderr}=await run(config.BITCOIN_CLI,args,{timeout:30000,windowsHide:true,maxBuffer:16*1024*1024});
+if(stderr&&stderr.trim())throw Error(stderr.trim());
+return stdout.trim()}
+
+let lastTemplateHeight=null;
+async function refreshTemplate(){
+try{
+const raw=await btcCli(['getblocktemplate','{"rules":["segwit"]}']);
+const t=JSON.parse(raw);
+if(t.height!==lastTemplateHeight){
+lastTemplateHeight=t.height;
+const job=jobManager.setTemplate(t);
+broadcastJob(job)}
+else if(jobManager.currentTemplate&&t.previousblockhash!==jobManager.currentTemplate.previousblockhash){
+const job=jobManager.setTemplate(t);
+broadcastJob(job)}}
+catch(e){console.error('Template refresh error:',e.message)}}
+
+function broadcastJob(job){
+const msg=JSON.stringify({type:'newJob',jobId:job.jobId,height:job.height,header:job.header,midstate:job.midstate,shareTarget:job.shareTarget,blockTarget:job.blockTarget,nonceStart:0,nonceEnd:4294967295});
+wss.clients.forEach(client=>{
+if(client.readyState===WebSocket.OPEN){
+try{client.send(msg)}catch{}}})}
+
+let broadcastInterval=null;
+function startBroadcastLoop(){
+if(broadcastInterval)return;
+broadcastInterval=setInterval(()=>{
+const stats=minerTracker.getPoolStats();
+const msg=JSON.stringify({type:'poolStats',...stats});
+wss.clients.forEach(client=>{
+if(client.readyState===WebSocket.OPEN){
+try{client.send(msg)}catch{}}})},5000)}
+
+app.get('/api/status',async(_q,r)=>{
+try{
+const[a,b]=await Promise.all([btcCli(['getblockchaininfo']),btcCli(['getmininginfo'])]);
+const i=JSON.parse(a),m=JSON.parse(b);
+r.json({ok:true,chain:i.chain,blocks:i.blocks,headers:i.headers,verificationprogress:i.verificationprogress,difficulty:i.difficulty,networkhashps:m.networkhashps,warnings:m.warnings||''})}
+catch(e){r.status(503).json({ok:false,error:e.message})}});
+
+app.get('/api/wallet',async(_q,r)=>{
+try{
+const w=JSON.parse(await btcCli(['getwalletinfo']));
+const bal=typeof w.balance==='number'?w.balance:null;
+r.json({ok:true,walletname:w.walletname,balance:bal,unconfirmed_balance:w.unconfirmed_balance,txcount:w.txcount})}
+catch(e){r.status(503).json({ok:false,error:e.message})}});
+
+app.get('/api/template',async(_q,r)=>{
+try{
+const t=JSON.parse(await btcCli(['getblocktemplate','{"rules":["segwit"]}']));
+r.json({ok:true,height:t.height,previousblockhash:t.previousblockhash,bits:t.bits,target:t.target,curtime:t.curtime,mintime:t.mintime,transactions:t.transactions?.length||0,coinbasevalue:t.coinbasevalue,raw:t})}
+catch(e){r.status(503).json({ok:false,error:e.message})}});
+
+app.get('/api/job',async(_req,res)=>{
+try{
+const address=config.PAYOUT_ADDRESS;
+if(!address)throw Error('Payout address not configured');
+
+const t=JSON.parse(await btcCli(['getblocktemplate','{"rules":["segwit"]}']));
+
+let job=jobManager.getCurrentJob();
+
+if(
+  !job ||
+  job.height!==t.height ||
+  job.previousblockhash!==t.previousblockhash
+){
+  job=jobManager.setTemplate(t);
+}
+
+res.json({ok:true,...job});
+}catch(e){
+res.status(400).json({ok:false,error:e.message});
+}});
+
+app.post('/api/submit',async(req,res)=>{
+try{
+const block=String(req.body?.block||'');
+if(!/^[0-9a-fA-F]+$/.test(block)||block.length<160||block.length%2)throw Error('Invalid block hex');
+const result=await btcCli(['submitblock',block]);
+res.json({ok:true,result:result||'accepted'})}
+catch(e){res.status(400).json({ok:false,error:e.message})}});
+
+app.post('/api/send',async(req,res)=>{
+if(process.env.ENABLE_SEND!=='1')return res.status(403).json({ok:false,error:'Wallet send disabled. Set ENABLE_SEND=1 explicitly.'});
+const{address,amount,subtractFeeFromAmount=false}=req.body||{};
+const value=Number(amount);
+if(!address||!Number.isFinite(value)||value<=0)return res.status(400).json({ok:false,error:'Invalid address or amount'});
+try{
+const args=['sendtoaddress',address,String(value)];
+if(subtractFeeFromAmount)args.push('','', 'false','true');
+res.json({ok:true,txid:await btcCli(args)})}
+catch(e){res.status(503).json({ok:false,error:e.message})}});
+
+app.post('/api/register-miner',(req,res)=>{
+try{
+const{btcAddress}=req.body||{};
+if(!btcAddress||typeof btcAddress!=='string'){
+return res.status(400).json({ok:false,error:'btcAddress required'})}
+const validation=validateAddress(btcAddress);
+if(!validation.valid){
+return res.status(400).json({ok:false,error:'Invalid Bitcoin address: '+validation.error})}
+const account=accountManager.getOrCreateAccount(btcAddress);
+const minerId='miner_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
+const wsConn=null;
+const registered=minerTracker.register(minerId,wsConn,account.account_id);
+if(!registered){
+return res.status(503).json({ok:false,error:'Pool full, max miners reached'})}
+const session=accountManager.getSession(minerId);
+res.json({ok:true,minerId,accountId:account.account_id,btcAddress:account.btc_address,isNew:account.isNew})}
+catch(e){
+console.error('Register miner error:',e.message);
+res.status(500).json({ok:false,error:e.message})}});
+
+app.get('/api/miner/:minerId/stats',(req,res)=>{
+try{
+const{minerId}=req.params;
+const miner=minerTracker.getMiner(minerId);
+if(!miner){
+return res.status(404).json({ok:false,error:'Miner not found or not connected'})}
+const stats=minerTracker.getMinerStats(minerId);
+if(!stats.accountId){
+return res.json({ok:true,registered:false,minerId,shares:stats.shares,hashrate:stats.hashrate,lastSeen:stats.lastSeen})}
+const account=accountManager.getAccount(stats.accountId);
+const balance=accountManager.getBalance(stats.accountId);
+const totalShares=accountManager.getShareCountByAccount(stats.accountId);
+res.json({ok:true,registered:true,minerId,accountId:stats.accountId,btcAddress:account?account.btc_address:null,shares:stats.shares,totalShares,hashrate:stats.hashrate,lastSeen:stats.lastSeen,balance:balance?{confirmed_sat:balance.confirmed_sat,pending_sat:balance.pending_sat,total_earned_sat:balance.total_earned_sat}:null})}
+catch(e){
+console.error('Get miner stats error:',e.message);
+res.status(500).json({ok:false,error:e.message})}});
+
+app.get('/api/my-stats',(req,res)=>{
+try{
+const{minerId}=req.query;
+if(!minerId){return res.status(400).json({ok:false,error:'minerId required'})}
+const miner=minerTracker.getMiner(minerId);
+if(!miner||!miner.accountId){
+return res.status(404).json({ok:false,error:'Miner not found or not registered'})}
+const stats=rewardEngine.getAccountStats(miner.accountId);
+if(!stats){return res.status(404).json({ok:false,error:'Account not found'})}
+const windowStats=rewardEngine.getSharesInWindow(miner.accountId,config.PPLNS_WINDOW_SIZE);
+res.json({ok:true,account_id:stats.account_id,btc_address:stats.btc_address,shares:stats.shares,shares_in_window:windowStats.count,shares_in_window_difficulty:windowStats.totalDifficulty,blocks_found:stats.blocks_found,balance:{pending_sat:stats.balance.pending_sat,confirmed_sat:stats.balance.confirmed_sat,total_earned_sat:stats.balance.total_earned_sat,pending_btc:(stats.balance.pending_sat/1e8).toFixed(8),confirmed_btc:(stats.balance.confirmed_sat/1e8).toFixed(8),total_earned_btc:(stats.balance.total_earned_sat/1e8).toFixed(8)},hashrate:miner.hashrate,lastSeen:miner.lastSeen})}
+catch(e){
+console.error('Get my-stats error:',e.message);
+res.status(500).json({ok:false,error:e.message})}});
+
+app.get('/api/pool-info',(_q,r)=>{
+try{
+const poolStats=minerTracker.getPoolStats();
+const blocks=accountManager.getAllBlocks();
+const confirmedBlocks=blocks.filter(b=>b.status==='confirmed'||b.status==='mature');
+const totalRewards=confirmedBlocks.reduce((sum,b)=>sum+b.coinbase_value,0);
+r.json({ok:true,miners_online:poolStats.minersOnline,pool_hashrate:poolStats.totalHashrate,total_shares:poolStats.totalShares,valid_blocks:poolStats.validBlocks,blocks_found:blocks.length,confirmed_blocks:confirmedBlocks.length,pool_fee_percent:config.POOL_FEE_PERCENT,pplns_window_size:config.PPLNS_WINDOW_SIZE,min_payout_sat:config.MIN_PAYOUT_SAT,total_rewards_sat:totalRewards,share_difficulty:config.SHARE_DIFFICULTY})}
+catch(e){
+console.error('Get pool-info error:',e.message);
+r.status(500).json({ok:false,error:e.message})}});
+
+app.get('/api/pool-stats',(_q,r)=>{
+r.json({ok:true,...minerTracker.getPoolStats(),jobManager:jobManager.getStats()})});
+
+app.get('/api/health',(_q,r)=>{
+r.json({ok:true,uptime:process.uptime(),miners:minerTracker.getMinerCount(),version:'5.1.0-pool'})});
+
+app.get('/api/payouts',(req,res)=>{
+try{
+const status=req.query.status||'all';
+const limit=parseInt(req.query.limit||'100',10);
+const db=getDb();
+let query=`SELECT p.*, a.btc_address FROM payouts p JOIN accounts a ON p.account_id=a.account_id`;
+let params=[];
+if(status!=='all'){query+=' WHERE p.status=?';params.push(status)}
+query+=' ORDER BY p.created_at DESC LIMIT ?';
+params.push(limit);
+const payouts=db.prepare(query).all(...params);
+res.json({ok:true,payouts})}
+catch(e){res.status(500).json({ok:false,error:e.message})}});
+
+app.get('/api/payout-stats',(_q,res)=>{
+try{
+const stats=payoutProcessor.getPayoutStats();
+res.json({ok:true,stats})}
+catch(e){res.status(500).json({ok:false,error:e.message})}});
+
+app.get('/api/audit',(req,res)=>{
+try{
+const accountId=req.query.accountId?parseInt(req.query.accountId,10):null;
+const limit=parseInt(req.query.limit||'100',10);
+const trail=AuditLog.getAuditTrail(accountId,limit);
+res.json({ok:true,audit:trail})}
+catch(e){res.status(500).json({ok:false,error:e.message})}});
+
+app.get('/api/audit/summary',(req,res)=>{
+try{
+const accountId=req.query.accountId?parseInt(req.query.accountId,10):null;
+let summary;
+if(accountId){summary=AuditLog.getAccountSummary(accountId)}
+else{summary=AuditLog.getPoolSummary()}
+res.json({ok:true,summary})}
+catch(e){res.status(500).json({ok:false,error:e.message})}});
+
+const wss=new WebSocket.Server({server,path:'/ws'});
+
+wss.on('connection',(ws,req)=>{
+const minerId='miner_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
+const registered=minerTracker.register(minerId,ws);
+if(!registered){ws.close(1013,'Max miners reached');return}
+ws.minerId=minerId;
+ws.registered=false;
+ws.accountId=null;
+console.log(`Miner connected: ${minerId} (total: ${minerTracker.getMinerCount()})`);
+
+ws.send(JSON.stringify({type:'welcome',minerId,version:'5.1.0-pool'}));
+
+const job=jobManager.getCurrentJob();
+if(job){
+ws.send(JSON.stringify({type:'newJob',jobId:job.jobId,height:job.height,header:job.header,midstate:job.midstate,shareTarget:job.shareTarget,blockTarget:job.blockTarget,nonceStart:0,nonceEnd:4294967295}))}
+
+ws.registrationTimeout=setTimeout(()=>{
+if(!ws.registered){
+console.log(`Miner ${minerId} did not register wallet, closing connection`);
+ws.close(1008,'Wallet registration required');
+try{minerTracker.unregister(minerId)}catch{}}},30000);
+
+ws.on('message',(data)=>{
+if(!rateLimiter.check(minerId,'message')){ws.close(1008,'Rate limit exceeded');return}
+try{
+const msg=JSON.parse(data.toString());
+handleMessage(ws,minerId,msg)}
+catch{}});
+
+ws.on('close',()=>{
+if(ws.registrationTimeout)clearTimeout(ws.registrationTimeout);
+minerTracker.unregister(minerId);
+console.log(`Miner disconnected: ${minerId} (total: ${minerTracker.getMinerCount()})`)});
+
+ws.on('error',(err)=>{console.error(`WebSocket error for ${minerId}:`,err.message)})});
+
+function handleMessage(ws,minerId,msg){
+if(!msg||typeof msg!=='object')return;
+minerTracker.updateSeen(minerId);
+
+if(msg.type==='register'){
+if(ws.registered){
+ws.send(JSON.stringify({type:'error',error:'Already registered'}));
+return}
+const{btcAddress}=msg;
+if(!btcAddress||typeof btcAddress!=='string'){
+ws.send(JSON.stringify({type:'registerFailed',error:'btcAddress required'}));
+return}
+const validation=validateAddress(btcAddress);
+if(!validation.valid){
+ws.send(JSON.stringify({type:'registerFailed',error:'Invalid Bitcoin address: '+validation.error}));
+return}
+try{
+const account=accountManager.getOrCreateAccount(btcAddress);
+const userAgent=ws.upgradeReq?.headers?.['user-agent']||null;
+minerTracker.linkAccount(minerId,account.account_id,userAgent);
+ws.registered=true;
+ws.accountId=account.account_id;
+if(ws.registrationTimeout)clearTimeout(ws.registrationTimeout);
+ws.send(JSON.stringify({type:'registered',accountId:account.account_id,btcAddress:account.btc_address,isNew:account.isNew}));
+console.log(`Miner ${minerId} registered with account ${account.account_id} (${account.btc_address})`)}
+catch(e){
+console.error('Registration error:',e.message);
+ws.send(JSON.stringify({type:'registerFailed',error:e.message}))}}
+
+else if(msg.type==='share'){
+if(!ws.registered){
+ws.send(JSON.stringify({type:'shareRejected',reason:'wallet registration required'}));
+return}
+if(!rateLimiter.check(minerId,'share')){ws.send(JSON.stringify({type:'error',error:'Share rate limit'}));return}
+const result=shareValidator.validate({minerId,jobId:msg.jobId,nonce:msg.nonce,hashHex:msg.hashHex});
+if(!result.valid){
+minerTracker.addInvalidShare(minerId);
+ws.send(JSON.stringify({type:'shareRejected',reason:result.error,stale:result.stale}));
+return}
+if(result.stale){
+minerTracker.addStaleShare(minerId);
+ws.send(JSON.stringify({type:'shareRejected',reason:'stale',stale:true}));
+return}
+if(!result.meetsShareTarget){
+minerTracker.addInvalidShare(minerId);
+ws.send(JSON.stringify({type:'shareRejected',reason:'does not meet share target'}));
+return}
+minerTracker.addShare(minerId,{jobId:result.jobId,nonce:result.nonce,hashHex:result.hashHex,difficulty:config.SHARE_DIFFICULTY||1});
+const miner=minerTracker.getMiner(minerId);
+if(miner&&miner.accountId){AuditLog.logShare(miner.accountId,result.jobId,config.SHARE_DIFFICULTY||1)}
+ws.send(JSON.stringify({type:'shareAccepted',jobId:result.jobId,nonce:result.nonce}));
+if(result.meetsBlockTarget){
+console.log(`BLOCK CANDIDATE from ${minerId}! Nonce: ${result.nonce}`);
+handleBlockCandidate(ws,minerId,result.jobId,result.nonce)}}
+
+else if(msg.type==='hashrate'){
+if(typeof msg.hashes==='number'&&msg.hashes>0){
+minerTracker.updateHashrate(minerId,msg.hashes)}}}
+
+async function handleBlockCandidate(ws,minerId,jobId,nonce){
+try{
+const job=jobManager.getJob(jobId);
+if(!job||job.stale){ws.send(JSON.stringify({type:'blockRejected',reason:'stale job'}));return}
+const blockHex=buildBlock(job,nonce);
+const blockHash=calculateBlockHash(blockHex);
+console.log('Submitting block to Bitcoin Core...');
+console.log('Block hash:',blockHash);
+try{
+const result=await btcCli(['submitblock',blockHex]);
+console.log('BLOCK ACCEPTED:',result||'accepted');
+const miner=minerTracker.getMiner(minerId);
+const blockResult=accountManager.insertBlock(miner?miner.accountId:null,minerId,job.height,job.coinbasevalue||0,blockHash);
+minerTracker.recordBlock(job.height,miner?miner.accountId:null,minerId,job.coinbasevalue||0);
+broadcastBlockFound(minerId,job.height);
+ws.send(JSON.stringify({type:'blockAccepted',height:job.height,blockHash}))}
+catch(e){
+console.error('Block rejected by Bitcoin Core:',e.message);
+ws.send(JSON.stringify({type:'blockRejected',reason:e.message}))}}
+catch(err){
+console.error('Block submission error:',err.message);
+ws.send(JSON.stringify({type:'blockRejected',reason:err.message}))}}
+
+function broadcastBlockFound(minerId,height){
+const msg=JSON.stringify({type:'blockFound',minerId,height});
+wss.clients.forEach(client=>{
+if(client.readyState===WebSocket.OPEN){
+try{client.send(msg)}catch{}}})}
+
+let templateInterval=null;
+function startTemplateRefresh(){
+if(templateInterval)return;
+templateInterval=setInterval(refreshTemplate,config.TEMPLATE_REFRESH_MS)}
+
+server.listen(PORT,'0.0.0.0',async()=>{
+console.log(`OLD BTC MINER V5 POOL -> http://0.0.0.0:${PORT}`);
+console.log(`WebSocket: ws://0.0.0.0:${PORT}/ws`);
+console.log(`Payout address: ${config.PAYOUT_ADDRESS?'[CONFIGURED]':'[NOT SET - edit .env]'}`);
+console.log(`Pool fee: ${config.POOL_FEE_PERCENT}% | PPLNS window: ${config.PPLNS_WINDOW_SIZE} | Min payout: ${config.MIN_PAYOUT_SAT} sat`);
+console.log(`Payout mode: ${config.PAYOUT_DRY_RUN?'DRY RUN (no real payments)':'LIVE (real payments enabled)'}`);
+
+try{
+console.log('[Startup] Checking for stale pending payouts...');
+const recovery=await payoutProcessor.recoverStalePendingPayouts();
+if(recovery.recovered>0){
+console.log(`[Startup] Recovery complete: ${recovery.recovered} processed, ${recovery.reverted} reverted, ${recovery.broadcast} to broadcast`)}
+else{console.log('[Startup] No stale pending payouts found')}}
+catch(e){console.error('[Startup] Recovery error:',e.message)}
+
+refreshTemplate();
+startTemplateRefresh();
+startBroadcastLoop();
+blockMonitor.start();
+payoutMonitor.start();
+
+const payoutInterval=setInterval(async()=>{
+try{
+console.log('[PayoutScheduler] Running periodic payout check...');
+const results=await payoutProcessor.processAllPayouts();
+if(results.length>0){
+console.log(`[PayoutScheduler] Processed ${results.length} payouts`);
+results.forEach(r=>console.log(`  Account ${r.account_id}: ${r.success?'SUCCESS':'FAILED'} - ${r.amount_sat||0} sat`))}
+else{console.log('[PayoutScheduler] No eligible accounts for payout')}}
+catch(e){console.error('[PayoutScheduler] Error:',e.message)}
+},config.PAYOUT_INTERVAL_MS)});
+
+process.on('SIGINT',()=>{
+console.log('Shutting down...');
+clearInterval(templateInterval);
+clearInterval(broadcastInterval);
+clearInterval(payoutInterval);
+minerTracker.destroy();
+rateLimiter.destroy();
+blockMonitor.stop();
+payoutMonitor.stop();
+jobManager.activeJobs.clear();
+wss.close();
+server.close();
+try{closeDb()}catch{}
+process.exit(0)});
+
+module.exports={app,server,jobManager,shareValidator,minerTracker,rateLimiter,btcCli,config};

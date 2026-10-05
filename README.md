@@ -1,22 +1,39 @@
 # OLD BTC MINER V5
 
-This is the V4 dashboard rebuilt as a real experimental solo CPU miner. It obtains a SegWit `getblocktemplate` from local Bitcoin Core, constructs the coinbase/header, searches the 32-bit nonce space with browser Web Workers, and submits a found block with `submitblock`. Bitcoin Core remains the consensus authority.
+Bitcoin Core mainnet CPU solo-mining pool. Browser Web Workers execute SHA-256d proof-of-work and submit shares to a local backend, which constructs and submits valid blocks to Bitcoin Core.
 
 ## Important
-- Mainnet only: the server refuses to operate against a non-main chain in the live audit.
+- Mainnet only: the server operates against Bitcoin Core mainnet.
 - The miner is educational/experimental. A desktop CPU has an extraordinarily small chance of finding a current-difficulty Bitcoin block.
 - No seed phrase/private key is ever requested.
-- Wallet sending is disabled unless `ENABLE_SEND=1` is explicitly set.
-- The audit never submits a block.
+- Payout address is server-side only — never sent to the browser.
+- No fake BTC rewards — reward is 0 until Bitcoin Core accepts a block.
 
 ## Install
 `npm install` then `npm test`.
 
-## Run
-`npm start` and open `http://127.0.0.1:3000`. Bitcoin Core must be running locally with RPC enabled. Set `BITCOIN_CLI` if `bitcoin-cli` is not on PATH.
+## Run (local backend)
+```
+set BITCOIN_CLI=C:\Program Files\Bitcoin\daemon\bitcoin-cli.exe
+copy .env.example .env
+REM Edit .env and set PAYOUT_ADDRESS
+start-backend.bat
+```
+
+Server runs at `http://0.0.0.0:3000`. WebSocket at `ws://0.0.0.0:3000/ws`.
+
+## Deploy
+See [DEPLOY.md](DEPLOY.md) for full deployment guide:
+- Backend: your PC (Node.js + Bitcoin Core)
+- Tunnel: Tailscale Funnel (free, no domain)
+- Frontend: Vercel/Netlify (free static hosting)
 
 ## Tests
-`npm test` validates SHA-256 vectors, all 64 K constants by deriving them from primes, SHA-256d against Node crypto, nonce endianness/boundaries, target comparison including equality, and exact 2^32 worker partitioning. `npm run bench` measures the kernel. `npm run audit` performs an optional live Mainnet/Core audit and intentionally fails/skips if no synced Core is available rather than pretending it passed.
+- `npm test` — SHA-256d, K constants, midstate, serialization, pool modules
+- `npm run test:pool` — WebSocket protocol, share validation, stale detection
+- `npm run test:integration` — Bitcoin Core mainnet integration
+- `npm run bench` — SHA-256d kernel benchmark
+- `npm run audit` — optional live mainnet/core audit
 
 ## Consensus design
-The SHA-256d kernel is single-source for Node and browser. The three V4 constant errors were corrected: K[7]=0xab1c5ed5, K[20]=0x2de92c6f, K[25]=0xa831c66d. The miner does not lower difficulty, does not alter the target, and fetches a fresh GBT after submission.
+SHA-256d kernel is single-source for Node and browser. K constants derived from primes. Miner does not alter the target. Server validates all shares by recalculating hashes.

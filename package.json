@@ -1,16 +1,20 @@
 {
   "name": "old-btc-miner-v5",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "private": true,
-  "description": "Bitcoin Core mainnet CPU solo-mining dashboard and browser worker",
+  "description": "Bitcoin Core mainnet CPU solo-mining pool dashboard and browser worker",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/core.test.js && node test/serialization.test.js",
+    "test": "node test/sha256d.test.js && node test/midstate.test.js && node test/serialization.test.js && node test/core.test.js && node test/address-validator.test.js && node test/account-manager.test.js && node test/reward-engine.test.js && node test/block-monitor.test.js && node test/e2e.test.js && node test/payout-processor.test.js && node test/payout-monitor.test.js && node test/payout-recovery.test.js && node test/audit.test.js && node test/pool-modules.test.js",
+    "test:pool": "node test/pool-protocol.test.js",
+    "test:integration": "node test/integration.test.js",
     "bench": "node bench/bench.js",
     "audit": "node audit/verify-v5-consensus.js"
   },
   "dependencies": {
-    "express": "^5.1.0"
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.1.0",
+    "ws": "^8.22.0"
   }
 }

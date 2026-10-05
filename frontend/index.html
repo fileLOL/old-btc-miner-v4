@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OLD BTC MINER // MAINNET // V5 POOL</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/config.js"></script>
+</head>
+<body>
+<main class="crt">
+<header class="topbar"><div class="brand">₿ OLD BTC MINER V5</div><div class="status"><span id="led"></span> <span id="statusText">OFFLINE</span></div><div class="clock" id="clock">--:--:--</div></header>
+<section class="grid">
+<article class="panel hero">
+<div class="panel-title">[ MINING CONSOLE ]</div><div class="big-btc">₿</div>
+<div class="metric"><span>NETWORK</span><b id="network">UNKNOWN</b></div>
+<div class="metric"><span>BLOCK HEIGHT</span><b id="blocks">---</b></div>
+<div class="metric"><span>DIFFICULTY</span><b id="difficulty">---</b></div>
+<div class="metric"><span>NETWORK HASHRATE</span><b id="hashrate">---</b></div>
+</article>
+<article class="panel">
+<div class="panel-title">[ MINER ]</div>
+<div class="ascii">+------------------+<br>|  SHA-256 ENGINE  |<br>|  POOL / MAINNET  |<br>+------------------+</div>
+<div class="metric"><span>MODE</span><b>CPU / BROWSER</b></div>
+<div class="metric"><span>STATUS</span><b id="minerStatus">IDLE</b></div>
+<div class="metric"><span>WORKERS</span><b id="workerCount">0</b></div>
+<div class="metric"><span>MY HASHRATE</span><b id="minerHashrate">0 H/s</b></div>
+<div class="metric"><span>CURRENT JOB</span><b id="templateHeight">---</b></div>
+<p class="note">⚠ CPU MINING — KEEP THIS TAB OPEN. Browser throttles background tabs, reducing hashrate.</p>
+<div class="buttons"><button id="start">[ START MINING ]</button><button id="stop">[ STOP ]</button></div>
+<div id="log" class="log">SYSTEM READY...</div>
+</article>
+<article class="panel pool">
+<div class="panel-title">[ POOL STATS ]</div>
+<div class="metric"><span>MINERS ONLINE</span><b id="minersOnline">0</b></div>
+<div class="metric"><span>POOL HASHRATE</span><b id="poolHashrate">0 H/s</b></div>
+<div class="metric"><span>MY SHARES</span><b id="myShares">0</b></div>
+<div class="metric"><span>VALID BLOCKS</span><b id="validBlocks">0</b></div>
+<div class="metric"><span>REWARD</span><b id="lastReward">0 BTC</b></div>
+<div class="metric"><span>PAYOUT</span><b id="wallet">SERVER-SIDE</b></div>
+</article>
+<article class="panel info">
+<div class="panel-title">[ BLOCK TEMPLATE ]</div>
+<div class="row"><span>HEIGHT</span><b id="tHeight">---</b></div>
+<div class="row"><span>PREVIOUS</span><b id="prev">---</b></div>
+<div class="row"><span>BITS</span><b id="bits">---</b></div>
+<div class="row"><span>TARGET</span><b id="target">---</b></div>
+<div class="row"><span>TX COUNT</span><b id="txcount">---</b></div>
+<div class="row"><span>COINBASE VALUE</span><b id="coinbase">---</b></div>
+<div class="warning">⚠ REAL MAINNET MINING. REWARD ONLY IF BLOCK ACCEPTED BY BITCOIN CORE.</div>
+</article>
+</section>
+<footer>OLD BTC MINER v5.1 // POOL MODE // MAINNET // NO PRIVATE KEYS IN BROWSER</footer>
+</main><script src="/sha256d.js"></script><script src="/worker.js"></script><script src="/app.js"></script>
+</body></html>

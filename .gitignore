@@ -1,8 +1,24 @@
-node_modules
-.DS_Store
+node_modules/
 .env
+.env.*
 .env.local
+!.env.example
 *.log
-.vscode
-.idea
-coverage
+*.pem
+*.key
+backup-before-opencode/
+server.v5-definitive.js
+.DS_Store
+Thumbs.db
+data/
+
+# Artifacts vacíos / temporales
+node
+npm
+old-btc-miner-v5@5.1.0
+old-btc-miner-v5.zip
+job.json
+
+# Documentos internos (no subir)
+AUDITORIA-SEGURIDAD-FINAL.md
+FASE3-IMPLEMENTATION-REPORT.md
