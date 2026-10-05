@@ -26,7 +26,26 @@ function connectWS(){
 const wsUrl=window.BACKEND_URL||'';
 if(!wsUrl){log('BACKEND_URL NOT CONFIGURED');return}
 try{ws=new WebSocket(wsUrl)}catch(e){log('WS CONNECT FAILED: '+e.message);return}
-ws.onopen=()=>{log('WEBSOCKET CONNECTED')};
+ws.onopen=()=>{
+log('WEBSOCKET CONNECTED');
+const btcAddress=$('btcAddress')?.value.trim();
+
+if(!btcAddress){
+log('BTC ADDRESS REQUIRED');
+$('minerStatus').textContent='WALLET REQUIRED';
+return;
+}
+
+try{
+ws.send(JSON.stringify({
+type:'register',
+btcAddress:btcAddress
+}));
+log('REGISTERING MINER...');
+}catch(e){
+log('REGISTER FAILED: '+e.message);
+}
+};
 ws.onmessage=e=>{
 const msg=JSON.parse(e.data);
 if(msg.type==='welcome'){minerId=msg.minerId;log('MINER ID: '+minerId)}
